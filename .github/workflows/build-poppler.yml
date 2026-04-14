@@ -2,7 +2,7 @@ name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  CACHE_REV: "p105" # ОСКРОСС ЗАЩИЩЕН
+  CACHE_REV: "p105"
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -60,6 +60,8 @@ jobs:
             echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
             echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
             echo "PKG_CONFIG_SYSROOT_DIR=/"
+            # 💡 Глобальная подсказка для CMake
+            echo "CMAKE_COMMON_FLAGS=-DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} -DCMAKE_FIND_ROOT_PATH=${{ env.INSTALL_DIR }}"
           } >> $GITHUB_ENV
 
       - name: 📚 Build Dependencies (The Titanium Chain)
@@ -67,17 +69,12 @@ jobs:
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 1/6 Сборка ZLIB (через родной configure)..."
+          echo "🔨 1/6 Сборка ZLIB..."
           cd ${{ github.workspace }}
           rm -rf zlib
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
-          # 💡 Zlib CMake строит лишние тесты, поэтому используем его "классический" конфигуратор
-          # Явно передаем кросс-инструменты в переменные окружения
-          CC=${{ env.OSXCROSS_HOST }}-clang \
-          AR=${{ env.OSXCROSS_HOST }}-ar \
-          RANLIB=${{ env.OSXCROSS_HOST }}-ranlib \
-          ./configure --prefix=${{ env.INSTALL_DIR }} --static
+          CC=${{ env.OSXCROSS_HOST }}-clang AR=${{ env.OSXCROSS_HOST }}-ar RANLIB=${{ env.OSXCROSS_HOST }}-ranlib ./configure --prefix=${{ env.INSTALL_DIR }} --static
           make -j$(nproc) install
 
           echo "🔨 2/6 Сборка LIBPNG..."
@@ -85,9 +82,8 @@ jobs:
           rm -rf libpng
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
             -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF
           make -j$(nproc) install
 
@@ -96,10 +92,10 @@ jobs:
           rm -rf freetype
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
             -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
-            -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
+            -DFT_WITH_ZLIB=ON -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=ON
           make -j$(nproc) install
 
           echo "🔨 4/6 Сборка EXPAT..."
@@ -107,7 +103,7 @@ jobs:
           rm -rf libexpat
           git clone --depth 1 https://github.com/libexpat/libexpat.git
           cd libexpat/expat && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
             -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF -DEXPAT_BUILD_TOOLS=OFF
           make -j$(nproc) install
@@ -123,7 +119,9 @@ jobs:
             EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
             EXPAT_LIBS="-L${{ env.INSTALL_DIR }}/lib -lexpat" \
             FREETYPE_CFLAGS="-I${{ env.INSTALL_DIR }}/include/freetype2" \
-            FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype"
+            FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype" \
+            ZLIB_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
+            ZLIB_LIBS="-L${{ env.INSTALL_DIR }}/lib -lz"
           make -j$(nproc) install
 
           echo "🔨 6/6 Сборка OPENJPEG..."
@@ -131,7 +129,7 @@ jobs:
           rm -rf openjpeg
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
           make -j$(nproc) install
 
@@ -146,18 +144,13 @@ jobs:
           cmake .. -G "Unix Makefiles" \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
+            -DCMAKE_FIND_ROOT_PATH=${{ env.INSTALL_DIR }} \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF \
             -DENABLE_UTILS=ON -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
             -DENABLE_LCMS=OFF -DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF \
-            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
-            -DFONTCONFIG_INCLUDE_DIR=${{ env.INSTALL_DIR }}/include \
-            -DFONTCONFIG_LIBRARY=${{ env.INSTALL_DIR }}/lib/libfontconfig.a \
-            -DFREETYPE_INCLUDE_DIR_ft2build=${{ env.INSTALL_DIR }}/include/freetype2 \
-            -DFREETYPE_INCLUDE_DIR_freetype2=${{ env.INSTALL_DIR }}/include/freetype2 \
-            -DFREETYPE_LIBRARY=${{ env.INSTALL_DIR }}/lib/libfreetype.a \
-            -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include -I${{ env.INSTALL_DIR }}/include/freetype2 -mmacosx-version-min=${{ env.MACOS_MIN_VER }}" \
-            -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include -I${{ env.INSTALL_DIR }}/include/freetype2 -mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
+            -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}" \
+            -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
           
           make -j$(nproc) install
 
