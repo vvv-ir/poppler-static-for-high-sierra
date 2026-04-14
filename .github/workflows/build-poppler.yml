@@ -2,8 +2,7 @@ name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  # ⛔️ ОСТАВЛЯЕМ p105 — это сохранит твой собранный osxcross!
-  CACHE_REV: "p105" 
+  CACHE_REV: "p105" # НЕ МЕНЯЕМ! Сохраняем собранный osxcross
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -40,10 +39,9 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Install Host Tools (FIXED)
+      - name: 🔧 Install Host Tools
         run: |
           sudo apt-get update
-          # Добавляем gettext, autopoint и gperf для Fontconfig
           sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake gettext autopoint
 
       - name: ♻️ Restore Osxcross
@@ -61,6 +59,9 @@ jobs:
             echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
             echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
             echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
+            # 💡 Глобальные флаги для всех последующих сборок
+            echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib"
+            echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include"
           } >> $GITHUB_ENV
 
       - name: 📚 Build Dependencies (The Full Chain)
@@ -83,24 +84,26 @@ jobs:
             -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
           make -j$(nproc) install && cd ../..
 
-          echo "🔨 3/5 Сборка EXPAT (FIXED)..."
+          echo "🔨 3/5 Сборка EXPAT (Чистая либа)..."
           git clone --depth 1 https://github.com/libexpat/libexpat.git
           cd libexpat/expat && ./buildconf.sh
-          # ОТКЛЮЧАЕМ EXAMPLES И TESTS, чтобы не было ошибок линковки
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
                       --enable-static --disable-shared --disable-examples --disable-tests
           make -j$(nproc) install && cd ../../..
 
-          echo "🔨 4/5 Сборка FONTCONFIG (FIXED)..."
+          echo "🔨 4/5 Сборка FONTCONFIG (Насильная линковка)..."
           git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
           cd fontconfig
           ./autogen.sh --sysconfdir=/etc --localstatedir=/var --disable-docs
+          # 💡 Здесь мы явно указываем пути к EXPAT через специальные флаги самого Fontconfig
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
             --enable-static --disable-shared --disable-libxml2 \
+            --with-expat-includes=${{ env.INSTALL_DIR }}/include \
+            --with-expat-lib=${{ env.INSTALL_DIR }}/lib \
             FREETYPE_CFLAGS="-I${{ env.INSTALL_DIR }}/include/freetype2" \
             FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype" \
-            EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
-            EXPAT_LIBS="-L${{ env.INSTALL_DIR }}/lib -lexpat"
+            LDFLAGS="-L${{ env.INSTALL_DIR }}/lib" \
+            CPPFLAGS="-I${{ env.INSTALL_DIR }}/include"
           make -j$(nproc) install && cd ..
 
           echo "🔨 5/5 Сборка OPENJPEG..."
@@ -121,7 +124,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF \
-            -DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DENABLE_BOOST=OFF \
             -DENABLE_UTILS=ON -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
             -DENABLE_LCMS=OFF -DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF \
             -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
@@ -144,4 +146,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: poppler-static-high-sierra
-          path: poppler-utils-high-sierra.tar.gz
+          path: poppler-static-high-sierra.tar.gz
