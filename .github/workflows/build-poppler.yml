@@ -2,7 +2,7 @@ name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  CACHE_REV: "p105" # НЕ МЕНЯЕМ! Сохраняем собранный osxcross
+  CACHE_REV: "p105" # ОСКРОСС НЕ ТРОГАЕМ
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -59,63 +59,66 @@ jobs:
             echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
             echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
             echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
-            # 💡 Глобальные флаги для всех последующих сборок
-            echo "LDFLAGS=-L${{ env.INSTALL_DIR }}/lib"
-            echo "CPPFLAGS=-I${{ env.INSTALL_DIR }}/include"
+            echo "PKG_CONFIG_SYSROOT_DIR=/"
           } >> $GITHUB_ENV
 
-      - name: 📚 Build Dependencies (The Full Chain)
+      - name: 📚 Build Dependencies (The Solid Chain)
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
           echo "🔨 1/5 Сборка LIBPNG..."
+          cd ${{ github.workspace }}
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && ./autogen.sh
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared
-          make -j$(nproc) install && cd ..
+          make -j$(nproc) install
 
           echo "🔨 2/5 Сборка FREETYPE..."
+          cd ${{ github.workspace }}
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
             -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
             -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
-          make -j$(nproc) install && cd ../..
+          make -j$(nproc) install
 
-          echo "🔨 3/5 Сборка EXPAT (Чистая либа)..."
+          echo "🔨 3/5 Сборка EXPAT (через CMake для надежности)..."
+          cd ${{ github.workspace }}
           git clone --depth 1 https://github.com/libexpat/libexpat.git
-          cd libexpat/expat && ./buildconf.sh
-          ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
-                      --enable-static --disable-shared --disable-examples --disable-tests
-          make -j$(nproc) install && cd ../../..
+          cd libexpat/expat && mkdir build && cd build
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+            -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF -DEXPAT_BUILD_TOOLS=OFF
+          make -j$(nproc) install
 
-          echo "🔨 4/5 Сборка FONTCONFIG (Насильная линковка)..."
+          echo "🔨 4/5 Сборка FONTCONFIG..."
+          cd ${{ github.workspace }}
           git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
           cd fontconfig
           ./autogen.sh --sysconfdir=/etc --localstatedir=/var --disable-docs
-          # 💡 Здесь мы явно указываем пути к EXPAT через специальные флаги самого Fontconfig
+          # 💡 Передаем ПРЯМЫЕ ПУТИ к нашим либам, чтобы configure не гадал
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
             --enable-static --disable-shared --disable-libxml2 \
-            --with-expat-includes=${{ env.INSTALL_DIR }}/include \
-            --with-expat-lib=${{ env.INSTALL_DIR }}/lib \
+            EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
+            EXPAT_LIBS="-L${{ env.INSTALL_DIR }}/lib -lexpat" \
             FREETYPE_CFLAGS="-I${{ env.INSTALL_DIR }}/include/freetype2" \
-            FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype" \
-            LDFLAGS="-L${{ env.INSTALL_DIR }}/lib" \
-            CPPFLAGS="-I${{ env.INSTALL_DIR }}/include"
-          make -j$(nproc) install && cd ..
+            FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype"
+          make -j$(nproc) install
 
           echo "🔨 5/5 Сборка OPENJPEG..."
+          cd ${{ github.workspace }}
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
-          make -j$(nproc) install && cd ../..
+          make -j$(nproc) install
 
       - name: 🔨 Build Poppler Static
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
+          cd ${{ github.workspace }}
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
           
