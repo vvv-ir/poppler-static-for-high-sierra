@@ -1,20 +1,16 @@
 # ╔════════════════════════════════════════════════════════════════════════════╗
 # ║                   POPPLER STATIC BUILDER ДЛЯ macOS 10.13                   ║
 # ║                                                                            ║
-# ║  Этот workflow собирает СТАТИЧЕСКИЕ утилиты Poppler (pdfimages, и др.)    ║
-# ║  которые не требуют установки сторонних библиотек на целевом Mac.         ║
-# ║                                                                            ║
-# ║  Включает:                                                                ║
-# ║  - pdfimages, pdftoppm, pdfinfo, pdftotext и др.                         ║
-# ║  - Поддержка JPEG, PNG и JPEG2000 (OpenJPEG)                             ║
-# ║  - Полная статическая линковка всех зависимостей                         ║
+# ║  Этот workflow производит "чистую" статическую сборку утилит Poppler.     ║
+# ║  Решение устраняет проблему отсутствующих библиотек (dylib) на High Sierra.║
 # ╚════════════════════════════════════════════════════════════════════════════╝
 
 name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  CACHE_REV: "p101"
+  # ⚙️ Глобальные настройки окружения
+  CACHE_REV: "p102"
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -28,20 +24,17 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 1: Подготовка окружения
+      # ШАГ 1: Подготовка инструментов хост-системы
       # ════════════════════════════════════════════════════════════════════════
-      - name: 📥 Checkout Code
-        uses: actions/checkout@v4
-
-      - name: 🔧 Install Build Tools (Host)
+      - name: 📦 Install Build Tools (Host)
         run: |
+          echo "🎬 Обновление пакетов Ubuntu..."
           sudo apt-get update
-          sudo apt-get install -y \
-            libxml2-dev uuid-dev libssl-dev nasm yasm pkg-config \
-            make cmake git curl wget build-essential automake libtool python3
+          sudo apt-get install -y libxml2-dev uuid-dev libssl-dev nasm yasm pkg-config \
+                                 make cmake git curl wget build-essential automake libtool python3
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 2: Развертывание Toolchain (Osxcross)
+      # ШАГ 2: Кросс-компилятор (Сердце системы)
       # ════════════════════════════════════════════════════════════════════════
       - name: ♻️ Restore/Build Osxcross
         id: cache-osxcross
@@ -50,9 +43,10 @@ jobs:
           path: ${{ env.OSXCROSS_ROOT }}
           key: osxcross-${{ env.CACHE_REV }}-${{ env.SDK_VERSION }}
 
-      - name: 🏗️ Setup Osxcross (if no cache)
+      - name: 🔨 Setup Osxcross
         if: steps.cache-osxcross.outputs.cache-hit != 'true'
         run: |
+          echo "🚀 Сборка кросс-компилятора с нуля..."
           git clone https://github.com/tpoechtrager/osxcross.git ${{ env.OSXCROSS_ROOT }}
           cd ${{ env.OSXCROSS_ROOT }}
           mkdir -p tarballs
@@ -60,80 +54,82 @@ jobs:
                -o tarballs/MacOSX${{ env.SDK_VERSION }}.sdk.tar.xz
           UNATTENDED=1 OSX_VERSION_MIN=${{ env.MACOS_MIN_VER }} ./build.sh
 
-      - name: ⚙️ Export Path
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 3: Конфигурация путей (Критическая точка исправления)
+      # ════════════════════════════════════════════════════════════════════════
+      - name: ⚙️ Setup Toolchain Environment
         run: |
+          echo "🔍 Проброс путей к компилятору..."
           echo "${{ env.OSXCROSS_TARGET_DIR }}/bin" >> $GITHUB_PATH
-          echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake" >> $GITHUB_ENV
+          # Эти переменные жизненно необходимы для CMake внутри osxcross
+          {
+            echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake"
+            echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
+            echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
+          } >> $GITHUB_ENV
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 3: Сборка фундаметальных библиотек (Dependencies)
-      # Мы собираем их статически, чтобы Poppler мог их "всосать" в себя.
+      # ШАГ 4: Статическая сборка зависимостей (Фундамент)
+      # Почему это здесь: Мы вшиваем поддержку графики прямо в бинарник.
       # ════════════════════════════════════════════════════════════════════════
       - name: 📚 Build Dependencies (Static)
         run: |
+          export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          # --- LIBJPEG-TURBO (Работа с JPEG) ---
+          echo "🔨 Сборка LIBJPEG-TURBO..."
           git clone --depth 1 https://github.com/libjpeg-turbo/libjpeg-turbo.git
           cd libjpeg-turbo && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DENABLE_SHARED=OFF -DCMAKE_BUILD_TYPE=Release
           make -j$(nproc) install && cd ../..
 
-          # --- LIBPNG (Работа с PNG) ---
+          echo "🔨 Сборка LIBPNG..."
           git clone --depth 1 https://github.com/glennrp/libpng.git
-          cd libpng
-          ./autogen.sh
+          cd libpng && ./autogen.sh
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared \
             CC=${{ env.OSXCROSS_HOST }}-clang CFLAGS="-mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
           make -j$(nproc) install && cd ..
 
-          # --- OPENJPEG (Критически важно для JPEG2000 в PDF) ---
+          echo "🔨 Сборка OPENJPEG (JPEG2000 support)..."
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
           make -j$(nproc) install && cd ../..
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 4: Сборка POPPLER
-      # Основной этап: отключаем всё лишнее (UI, тесты), оставляем только утилиты.
+      # ШАГ 5: Сборка POPPLER UTILS
+      # Результат: pdfimages, pdftoppm и др. без внешних зависимостей.
       # ════════════════════════════════════════════════════════════════════════
-      - name: 🔨 Build Poppler Static Utils
+      - name: 🔨 Build Poppler Static
         run: |
+          export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
           
-          cmake .. \
+          cmake .. -G "Unix Makefiles" \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_CPP_LIB=OFF \
-            -DENABLE_GLIB=OFF \
-            -DENABLE_QT5=OFF \
-            -DENABLE_QT6=OFF \
-            -DENABLE_UTILS=ON \
-            -DENABLE_CMS='none' \
-            -DENABLE_LIBOPENJPEG='openjpeg2' \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF \
+            -DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF \
+            -DENABLE_UTILS=ON -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
             -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
             -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}" \
             -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
           
-          make -j$(nproc)
-          make install
+          make -j$(nproc) install
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 5: Проверка и упаковка
+      # ШАГ 6: Упаковка результата
       # ════════════════════════════════════════════════════════════════════════
-      - name: ✅ Verify and Upload
+      - name: ✅ Finalizing and Archiving
         run: |
-          echo "🔍 Проверка бинарника pdfimages:"
+          echo "🔍 Валидация архитектуры x86_64..."
           file ${{ github.workspace }}/poppler_dist/bin/pdfimages
-          
-          # Создаем чистый архив только с инструментами
           cd ${{ github.workspace }}/poppler_dist/bin/
-          tar -cvzf ../../poppler-utils-high-sierra.tar.gz *
+          tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
       - name: ⬆️ Upload Artifact
         uses: actions/upload-artifact@v4
@@ -141,8 +137,13 @@ jobs:
           name: poppler-static-high-sierra
           path: poppler-utils-high-sierra.tar.gz
 
-      - name: 🔍 Debug Info on Failure
+      # ════════════════════════════════════════════════════════════════════════
+      # СИСТЕМА САМОЗАЩИТЫ (DEBUG)
+      # ════════════════════════════════════════════════════════════════════════
+      - name: 🔍 Debug Info
         if: failure()
         run: |
-          echo "❌ Ошибка сборки. Состояние зависимостей:"
-          ls -R ${{ env.INSTALL_DIR }}
+          echo "❌ КРИТИЧЕСКАЯ ОШИБКА. Диагностика:"
+          echo "OSXCROSS_SDK: $OSXCROSS_SDK"
+          ls -R ${{ env.OSXCROSS_TARGET_DIR }}/SDK || echo "SDK не найден"
+          head -n 30 ${{ env.OSXCROSS_CONF }}
