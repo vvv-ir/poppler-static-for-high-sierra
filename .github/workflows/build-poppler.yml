@@ -52,59 +52,86 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 🔧 Install Host Tools
-        run: sudo apt-get update && sudo apt-get install -y nasm yasm cmake make pkg-config
+        run: sudo apt-get update && sudo apt-get install -y nasm yasm cmake make pkg-config gperf
 
-      - name: ♻️ Restore Osxcross (From Job 1)
+      - name: ♻️ Restore Osxcross
         uses: actions/cache@v4
         with:
           path: ${{ env.OSXCROSS_ROOT }}
           key: osxcross-${{ env.CACHE_REV }}-${{ env.SDK_VERSION }}
-          fail-on-cache-miss: true # Мы уверены, что он там есть
+          fail-on-cache-miss: true
 
       - name: ⚙️ Fix Toolchain Paths
         run: |
           echo "${{ env.OSXCROSS_TARGET_DIR }}/bin" >> $GITHUB_PATH
-          echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake" >> $GITHUB_ENV
-          echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}" >> $GITHUB_ENV
+          {
+            echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake"
+            echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
+            echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
+            echo "PKG_CONFIG_PATH=${{ env.INSTALL_DIR }}/lib/pkgconfig"
+          } >> $GITHUB_ENV
 
-      - name: 📚 Build Dependencies (Static)
+      - name: 📚 Build Dependencies (The Big Four)
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 Сборка LIBJPEG-TURBO..."
+          echo "🔨 1/4 Сборка LIBJPEG-TURBO..."
           git clone --depth 1 https://github.com/libjpeg-turbo/libjpeg-turbo.git
           cd libjpeg-turbo && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DENABLE_SHARED=OFF -DCMAKE_BUILD_TYPE=Release
-          make -j$(nproc) install
+          make -j$(nproc) install && cd ../..
 
-          echo "🔨 Сборка OPENJPEG..."
-          cd ${{ github.workspace }}
+          echo "🔨 2/4 Сборка FREETYPE (Критично для Poppler)..."
+          git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
+          cd freetype && mkdir build && cd build
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc) install && cd ../..
+
+          echo "🔨 3/4 Сборка LIBPNG..."
+          git clone --depth 1 https://github.com/glennrp/libpng.git
+          cd libpng && ./autogen.sh
+          ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared \
+            CC=${{ env.OSXCROSS_HOST }}-clang CFLAGS="-mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
+          make -j$(nproc) install && cd ..
+
+          echo "🔨 4/4 Сборка OPENJPEG..."
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
-          make -j$(nproc) install
+          make -j$(nproc) install && cd ../..
 
       - name: 🔨 Build Poppler Static
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
+          
+          # Мы добавляем -DENABLE_UNSTABLE_API_ABI_HEADERS=ON так как некоторые утилиты это любят
+          # И жестко указываем путь к нашему свежесобранному Freetype
           cmake .. -G "Unix Makefiles" \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF \
-            -DENABLE_UTILS=ON -DENABLE_LIBOPENJPEG='openjpeg2' \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_CPP_LIB=OFF \
+            -DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DENABLE_BOOST=OFF \
+            -DENABLE_UTILS=ON -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
             -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
+            -DFREETYPE_INCLUDE_DIR_ft2build=${{ env.INSTALL_DIR }}/include/freetype2 \
+            -DFREETYPE_LIBRARY=${{ env.INSTALL_DIR }}/lib/libfreetype.a \
             -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}" \
             -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include -mmacosx-version-min=${{ env.MACOS_MIN_VER }}"
+          
           make -j$(nproc) install
 
       - name: ✅ Finalize
         run: |
+          echo "🔍 Проверка бинарников..."
+          ls -lh ${{ github.workspace }}/poppler_dist/bin/
           cd ${{ github.workspace }}/poppler_dist/bin/
           tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
