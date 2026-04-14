@@ -1,15 +1,9 @@
-# ╔════════════════════════════════════════════════════════════════════════════╗
-# ║                   POPPLER STATIC BUILDER ДЛЯ macOS 10.13                   ║
-# ║                                                                            ║
-# ║  ИСПРАВЛЕНИЕ: Добавление Fontconfig (2.15) и Expat (XML Parser)           ║
-# ║  МЕТОД: Полная каскадная статическая сборка графического стека.           ║
-# ╚════════════════════════════════════════════════════════════════════════════╝
-
 name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  CACHE_REV: "p105"
+  # ⛔️ ОСТАВЛЯЕМ p105 — это сохранит твой собранный osxcross!
+  CACHE_REV: "p105" 
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -22,7 +16,7 @@ jobs:
   prepare_toolchain:
     runs-on: ubuntu-22.04
     steps:
-      - name: ♻️ Restore/Build Osxcross
+      - name: ♻️ Restore Osxcross
         id: cache-osxcross
         uses: actions/cache@v4
         with:
@@ -46,8 +40,11 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Install Host Tools
-        run: sudo apt-get update && sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake
+      - name: 🔧 Install Host Tools (FIXED)
+        run: |
+          sudo apt-get update
+          # Добавляем gettext, autopoint и gperf для Fontconfig
+          sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake gettext autopoint
 
       - name: ♻️ Restore Osxcross
         uses: actions/cache@v4
@@ -64,7 +61,6 @@ jobs:
             echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
             echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
             echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
-            echo "PKG_CONFIG_SYSROOT_DIR=/"
           } >> $GITHUB_ENV
 
       - name: 📚 Build Dependencies (The Full Chain)
@@ -87,14 +83,16 @@ jobs:
             -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
           make -j$(nproc) install && cd ../..
 
-          echo "🔨 3/5 Сборка EXPAT (Нужен для Fontconfig)..."
+          echo "🔨 3/5 Сборка EXPAT (FIXED)..."
           git clone --depth 1 https://github.com/libexpat/libexpat.git
           cd libexpat/expat && ./buildconf.sh
-          ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared
+          # ОТКЛЮЧАЕМ EXAMPLES И TESTS, чтобы не было ошибок линковки
+          ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
+                      --enable-static --disable-shared --disable-examples --disable-tests
           make -j$(nproc) install && cd ../../..
 
-          echo "🔨 4/5 Сборка FONTCONFIG (2.15+)..."
-          git clone --depth 1 -b 2.15.0 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
+          echo "🔨 4/5 Сборка FONTCONFIG (FIXED)..."
+          git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
           cd fontconfig
           ./autogen.sh --sysconfdir=/etc --localstatedir=/var --disable-docs
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
@@ -112,7 +110,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
           make -j$(nproc) install && cd ../..
 
-      - name: 🔨 Build Poppler Static (Total Control)
+      - name: 🔨 Build Poppler Static
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
@@ -139,9 +137,6 @@ jobs:
 
       - name: ✅ Finalize
         run: |
-          echo "🔍 Проверка полученных инструментов:"
-          ls -lh ${{ github.workspace }}/poppler_dist/bin/
-          file ${{ github.workspace }}/poppler_dist/bin/pdfimages
           cd ${{ github.workspace }}/poppler_dist/bin/
           tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
