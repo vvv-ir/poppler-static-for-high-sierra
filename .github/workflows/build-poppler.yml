@@ -2,7 +2,7 @@ name: Poppler_HighSierra_Static_Expert
 on: [push, workflow_dispatch]
 
 env:
-  CACHE_REV: "p105" # ОСКРОСС НЕ ТРОГАЕМ
+  CACHE_REV: "p105" # ОСКРОСС ЗАЩИЩЕН
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -62,21 +62,35 @@ jobs:
             echo "PKG_CONFIG_SYSROOT_DIR=/"
           } >> $GITHUB_ENV
 
-      - name: 📚 Build Dependencies (The Solid Chain)
+      - name: 📚 Build Dependencies (The Titanium Chain)
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 1/5 Сборка LIBPNG (теперь через CMake)..."
+          echo "🔨 1/6 Сборка ZLIB (База для PNG)..."
+          cd ${{ github.workspace }}
+          rm -rf zlib
+          git clone --depth 1 https://github.com/madler/zlib.git
+          cd zlib && mkdir build && cd build
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+            -DBUILD_SHARED_LIBS=OFF
+          make -j$(nproc) install
+
+          echo "🔨 2/6 Сборка LIBPNG..."
+          cd ${{ github.workspace }}
           rm -rf libpng
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
+          # 💡 Добавлен CMAKE_PREFIX_PATH чтобы libpng нашел наш новый ZLIB
+          # 💡 Исправлен флаг PNG_EXECUTABLES на PNG_TOOLS
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_EXECUTABLES=OFF
+            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
+            -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF
           make -j$(nproc) install
 
-          echo "🔨 2/5 Сборка FREETYPE..."
+          echo "🔨 3/6 Сборка FREETYPE..."
           cd ${{ github.workspace }}
           rm -rf freetype
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
@@ -87,7 +101,7 @@ jobs:
             -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
           make -j$(nproc) install
 
-          echo "🔨 3/5 Сборка EXPAT..."
+          echo "🔨 4/6 Сборка EXPAT..."
           cd ${{ github.workspace }}
           rm -rf libexpat
           git clone --depth 1 https://github.com/libexpat/libexpat.git
@@ -97,7 +111,7 @@ jobs:
             -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF -DEXPAT_BUILD_TOOLS=OFF
           make -j$(nproc) install
 
-          echo "🔨 4/5 Сборка FONTCONFIG..."
+          echo "🔨 5/6 Сборка FONTCONFIG..."
           cd ${{ github.workspace }}
           rm -rf fontconfig
           git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
@@ -111,7 +125,7 @@ jobs:
             FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype"
           make -j$(nproc) install
 
-          echo "🔨 5/5 Сборка OPENJPEG..."
+          echo "🔨 6/6 Сборка OPENJPEG..."
           cd ${{ github.workspace }}
           rm -rf openjpeg
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
@@ -149,7 +163,6 @@ jobs:
       - name: ✅ Finalize
         run: |
           cd ${{ github.workspace }}/poppler_dist/bin/
-          # Создаем архив со всеми утилитами (pdfimages, pdftotext и т.д.)
           tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
       - name: ⬆️ Upload Artifact
