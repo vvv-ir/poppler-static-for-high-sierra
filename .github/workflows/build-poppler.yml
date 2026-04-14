@@ -67,15 +67,18 @@ jobs:
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 1/5 Сборка LIBPNG..."
-          cd ${{ github.workspace }}
+          echo "🔨 1/5 Сборка LIBPNG (теперь через CMake)..."
+          rm -rf libpng
           git clone --depth 1 https://github.com/glennrp/libpng.git
-          cd libpng && ./autogen.sh
-          ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared
+          cd libpng && mkdir build && cd build
+          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+            -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_EXECUTABLES=OFF
           make -j$(nproc) install
 
           echo "🔨 2/5 Сборка FREETYPE..."
           cd ${{ github.workspace }}
+          rm -rf freetype
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
@@ -84,8 +87,9 @@ jobs:
             -DFT_WITH_ZLIB=OFF -DFT_WITH_BZIP2=OFF -DFT_WITH_PNG=OFF
           make -j$(nproc) install
 
-          echo "🔨 3/5 Сборка EXPAT (через CMake для надежности)..."
+          echo "🔨 3/5 Сборка EXPAT..."
           cd ${{ github.workspace }}
+          rm -rf libexpat
           git clone --depth 1 https://github.com/libexpat/libexpat.git
           cd libexpat/expat && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
@@ -95,10 +99,10 @@ jobs:
 
           echo "🔨 4/5 Сборка FONTCONFIG..."
           cd ${{ github.workspace }}
+          rm -rf fontconfig
           git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
           cd fontconfig
           ./autogen.sh --sysconfdir=/etc --localstatedir=/var --disable-docs
-          # 💡 Передаем ПРЯМЫЕ ПУТИ к нашим либам, чтобы configure не гадал
           ./configure --host=${{ env.OSXCROSS_HOST }} --prefix=${{ env.INSTALL_DIR }} \
             --enable-static --disable-shared --disable-libxml2 \
             EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
@@ -109,6 +113,7 @@ jobs:
 
           echo "🔨 5/5 Сборка OPENJPEG..."
           cd ${{ github.workspace }}
+          rm -rf openjpeg
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
@@ -119,6 +124,7 @@ jobs:
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           cd ${{ github.workspace }}
+          rm -rf poppler
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
           
@@ -143,6 +149,7 @@ jobs:
       - name: ✅ Finalize
         run: |
           cd ${{ github.workspace }}/poppler_dist/bin/
+          # Создаем архив со всеми утилитами (pdfimages, pdftotext и т.д.)
           tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
       - name: ⬆️ Upload Artifact
