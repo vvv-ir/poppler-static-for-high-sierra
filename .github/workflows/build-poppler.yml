@@ -67,14 +67,17 @@ jobs:
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 1/6 Сборка ZLIB (База для PNG)..."
+          echo "🔨 1/6 Сборка ZLIB (через родной configure)..."
           cd ${{ github.workspace }}
           rm -rf zlib
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DBUILD_SHARED_LIBS=OFF
+          cd zlib
+          # 💡 Zlib CMake строит лишние тесты, поэтому используем его "классический" конфигуратор
+          # Явно передаем кросс-инструменты в переменные окружения
+          CC=${{ env.OSXCROSS_HOST }}-clang \
+          AR=${{ env.OSXCROSS_HOST }}-ar \
+          RANLIB=${{ env.OSXCROSS_HOST }}-ranlib \
+          ./configure --prefix=${{ env.INSTALL_DIR }} --static
           make -j$(nproc) install
 
           echo "🔨 2/6 Сборка LIBPNG..."
@@ -82,8 +85,6 @@ jobs:
           rm -rf libpng
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
-          # 💡 Добавлен CMAKE_PREFIX_PATH чтобы libpng нашел наш новый ZLIB
-          # 💡 Исправлен флаг PNG_EXECUTABLES на PNG_TOOLS
           cmake .. -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_CONF }} \
             -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
             -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
