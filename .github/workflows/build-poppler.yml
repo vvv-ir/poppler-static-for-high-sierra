@@ -1,17 +1,16 @@
-name: 📄 Poppler_HighSierra_Fixed
+name: 📄 Poppler_HighSierra_Manual_Control
 
 on:
   push:
   workflow_dispatch:
 
 env:
-  # ТОТ САМЫЙ ХОСТ, который потерял CMake
+  # Жёстко заданные константы — фундамент (No Magic)
   OSXCROSS_HOST: "x86_64-apple-darwin19"
   MACOSX_DEPLOYMENT_TARGET: "10.13"
-  OSXCROSS_URL: "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v1.0/osxcross-universal-10.13.tar.xz"
-  INSTALL_DIR: ${{ github.workspace }}/deps_dist
-  # Путь внутри раннера, где будет лежать тулчейн
   OSXCROSS_ROOT: "/opt/osxcross"
+  INSTALL_DIR: "${{ github.workspace }}/deps_dist"
+  TOOLCHAIN_FILE: "/opt/osxcross/toolchain.cmake"
 
 jobs:
   build:
@@ -21,78 +20,87 @@ jobs:
         uses: actions/checkout@v4
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 1: Развертывание (Исправленные пути)
+      # ШАГ 1: Развертывание тулчейна (Ручная распаковка)
       # ════════════════════════════════════════════════════════════════════════
-      - name: 🚀 Deploy Universal Toolchain
+      - name: 🚀 Deploy Toolchain
         run: |
           sudo mkdir -p ${{ env.OSXCROSS_ROOT }}
-          # Распаковываем так, чтобы в /opt/osxcross сразу были bin, lib, SDK
-          curl -L ${{ env.OSXCROSS_URL }} | sudo tar -xJ -C ${{ env.OSXCROSS_ROOT }} --strip-components=1
+          # --strip-components=1 гарантирует, что bin/ лежит прямо в /opt/osxcross/
+          curl -L "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v1.0/osxcross-universal-10.13.tar.xz" \
+               | sudo tar -xJ -C ${{ env.OSXCROSS_ROOT }} --strip-components=1
           
-          # Прописываем бинарники в PATH
-          echo "${{ env.OSXCROSS_ROOT }}/bin" >> $GITHUB_PATH
-          
-      - name: 🔧 Install Host Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake gperf libtool automake autoconf-archive pkg-config
+          # Проверяем физическое наличие файла (Anti-Hallucination Check)
+          if [ ! -f "${{ env.TOOLCHAIN_FILE }}" ]; then echo "Ошибка: Toolchain file NOT FOUND!"; exit 1; fi
+
+      - name: 🔧 Install System Tools
+        run: sudo apt-get update && sudo apt-get install -y cmake gperf libtool automake autoconf-archive pkg-config
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 2: Переменные для CMake (The Guard)
+      # ШАГ 2: Сборка ZLIB (С ручным указанием компилятора)
       # ════════════════════════════════════════════════════════════════════════
-      - name: ⚙️ Setup Build Env
-        run: |
-          {
-            echo "CMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_ROOT }}/toolchain.cmake"
-            echo "CC=${{ env.OSXCROSS_HOST }}-clang"
-            echo "CXX=${{ env.OSXCROSS_HOST }}-clang++"
-          } >> $GITHUB_ENV
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 3: Зависимости (Теперь с явными путями)
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 📚 Build Dependencies
+      - name: 📚 Build ZLIB
         run: |
           mkdir -p ${{ env.INSTALL_DIR }}
-          
-          # 1. ZLIB
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib && ./configure --prefix=${{ env.INSTALL_DIR }} --static
-          make -j$(nproc) install && cd ..
-
-          # 2. LIBPNG
-          git clone --depth 1 https://github.com/glennrp/libpng.git
-          cd libpng && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
-                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-                   -DPNG_SHARED=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }}
-          make -j$(nproc) install && cd ../..
-
-          # 3. FREETYPE
-          git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
-          cd freetype && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
-                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-                   -DBUILD_SHARED_LIBS=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }}
-          make -j$(nproc) install && cd ../..
+          cd zlib
+          # Явно выставляем инструменты для configure
+          CHOST=${{ env.OSXCROSS_HOST }} \
+          CC=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
+          RANLIB=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-ranlib \
+          ./configure --prefix=${{ env.INSTALL_DIR }} --static
+          make -j$(nproc) install
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 4: Финальный Poppler
+      # ШАГ 3: Сборка LIBPNG (С полным контролем CMake)
+      # ════════════════════════════════════════════════════════════════════════
+      - name: 📚 Build LIBPNG
+        run: |
+          git clone --depth 1 https://github.com/glennrp/libpng.git
+          cd libpng && mkdir build && cd build
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }} \
+            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+            -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
+            -DPNG_SHARED=OFF \
+            -DPNG_TESTS=OFF \
+            -DCMAKE_C_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
+            -DZLIB_INCLUDE_DIR=${{ env.INSTALL_DIR }}/include \
+            -DZLIB_LIBRARY=${{ env.INSTALL_DIR }}/lib/libz.a
+          make -j$(nproc) install
+
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 4: Сборка POPPLER (Максимальный контроль)
       # ════════════════════════════════════════════════════════════════════════
       - name: 🔨 Build Poppler
         run: |
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
+          
+          # Мы не верим, что Poppler сам найдет Zlib или PNG. Мы указываем их за руку.
+          cmake .. \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
+            -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }} \
-            -DBUILD_SHARED_LIBS=OFF -DENABLE_UTILS=ON -DENABLE_GLIB=OFF \
-            -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
-            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }}
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_UTILS=ON \
+            -DENABLE_GLIB=OFF \
+            -DENABLE_QT5=OFF \
+            -DENABLE_QT6=OFF \
+            -DCMAKE_C_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
+            -DCMAKE_CXX_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang++ \
+            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
+            -DZLIB_ROOT=${{ env.INSTALL_DIR }} \
+            -DPNG_PNG_INCLUDE_DIR=${{ env.INSTALL_DIR }}/include
+          
           make -j$(nproc) install
+
+      - name: ✅ Finalize
+        run: |
+          tar -cvzf poppler-high-sierra-final.tar.gz -C ${{ github.workspace }}/poppler_dist/bin .
 
       - name: ⬆️ Upload
         uses: actions/upload-artifact@v4
         with:
-          name: poppler-high-sierra
-          path: ${{ github.workspace }}/poppler_dist/bin/
+          name: poppler-final
+          path: poppler-high-sierra-final.tar.gz
