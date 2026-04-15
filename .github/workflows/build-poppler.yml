@@ -1,49 +1,61 @@
-name: 📄 Poppler_HighSierra_Static_Optimized
+name: 📄 Poppler_HighSierra_Fixed
 
 on:
-  push:             # Теперь запускается при каждом пуше
-    branches: [ main, master ]
-  workflow_dispatch: # И вручную
+  push:
+  workflow_dispatch:
 
 env:
+  # ТОТ САМЫЙ ХОСТ, который потерял CMake
+  OSXCROSS_HOST: "x86_64-apple-darwin19"
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
   OSXCROSS_URL: "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v1.0/osxcross-universal-10.13.tar.xz"
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
-  MACOS_MIN: "10.13"
+  # Путь внутри раннера, где будет лежать тулчейн
+  OSXCROSS_ROOT: "/opt/osxcross"
 
 jobs:
-  build_poppler:
+  build:
     runs-on: ubuntu-22.04
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 1: Развертывание "Универсального Оскросса" (Мгновенно)
+      # ШАГ 1: Развертывание (Исправленные пути)
       # ════════════════════════════════════════════════════════════════════════
       - name: 🚀 Deploy Universal Toolchain
         run: |
-          sudo mkdir -p /opt/osxcross
-          curl -L ${{ env.OSXCROSS_URL }} | sudo tar -xJ -C /opt/osxcross
-          echo "/opt/osxcross/bin" >> $GITHUB_PATH
-          echo "OSXCROSS_ROOT=/opt/osxcross" >> $GITHUB_ENV
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 2: Системные инструменты линукса
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 🔧 Install Build Tools
+          sudo mkdir -p ${{ env.OSXCROSS_ROOT }}
+          # Распаковываем так, чтобы в /opt/osxcross сразу были bin, lib, SDK
+          curl -L ${{ env.OSXCROSS_URL }} | sudo tar -xJ -C ${{ env.OSXCROSS_ROOT }} --strip-components=1
+          
+          # Прописываем бинарники в PATH
+          echo "${{ env.OSXCROSS_ROOT }}/bin" >> $GITHUB_PATH
+          
+      - name: 🔧 Install Host Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake gperf libtool automake autoconf-archive pkg-config
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 3: Сборка статических либ (Оптимизированный набор)
+      # ШАГ 2: Переменные для CMake (The Guard)
+      # ════════════════════════════════════════════════════════════════════════
+      - name: ⚙️ Setup Build Env
+        run: |
+          {
+            echo "CMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_ROOT }}/toolchain.cmake"
+            echo "CC=${{ env.OSXCROSS_HOST }}-clang"
+            echo "CXX=${{ env.OSXCROSS_HOST }}-clang++"
+          } >> $GITHUB_ENV
+
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 3: Зависимости (Теперь с явными путями)
       # ════════════════════════════════════════════════════════════════════════
       - name: 📚 Build Dependencies
         run: |
           mkdir -p ${{ env.INSTALL_DIR }}
-          # Используем CMake везде, где это возможно — это надежнее для кросс-сборки
           
-          # 1. ZLIB (База)
+          # 1. ZLIB
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib && ./configure --prefix=${{ env.INSTALL_DIR }} --static
           make -j$(nproc) install && cd ..
@@ -51,46 +63,36 @@ jobs:
           # 2. LIBPNG
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
-                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DPNG_SHARED=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
+                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+                   -DPNG_SHARED=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }}
           make -j$(nproc) install && cd ../..
 
-          # 3. FREETYPE (Критичен для PDF)
+          # 3. FREETYPE
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
-                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
+                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
+                   -DBUILD_SHARED_LIBS=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }}
           make -j$(nproc) install && cd ../..
 
       # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 4: Сборка Poppler (Используем наш универсальный SDK)
+      # ШАГ 4: Финальный Poppler
       # ════════════════════════════════════════════════════════════════════════
-      - name: 🔨 Build Poppler Static
+      - name: 🔨 Build Poppler
         run: |
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
-          
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ env.CMAKE_TOOLCHAIN_FILE }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN }} \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DENABLE_UTILS=ON \
-            -DENABLE_GLIB=OFF \
-            -DENABLE_QT5=OFF \
-            -DENABLE_QT6=OFF \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }} \
+            -DBUILD_SHARED_LIBS=OFF -DENABLE_UTILS=ON -DENABLE_GLIB=OFF \
+            -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
             -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }}
-          
           make -j$(nproc) install
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 5: Финализация
-      # ════════════════════════════════════════════════════════════════════════
-      - name: ✅ Archive Results
-        run: |
-          tar -cvzf poppler-high-sierra.tar.gz -C ${{ github.workspace }}/poppler_dist/bin .
 
       - name: ⬆️ Upload
         uses: actions/upload-artifact@v4
         with:
-          name: poppler-final
-          path: poppler-high-sierra.tar.gz
+          name: poppler-high-sierra
+          path: ${{ github.workspace }}/poppler_dist/bin/
