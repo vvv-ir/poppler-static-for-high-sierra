@@ -1,147 +1,96 @@
-name: Poppler_HighSierra_Static_Final
-on: [push, workflow_dispatch]
+name: 📄 Poppler_HighSierra_Static_Optimized
+
+on:
+  push:             # Теперь запускается при каждом пуше
+    branches: [ main, master ]
+  workflow_dispatch: # И вручную
 
 env:
-  CACHE_REV: "p108-fix"
-  OSXCROSS_ROOT: /home/runner/osxcross
-  OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
+  OSXCROSS_URL: "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v1.0/osxcross-universal-10.13.tar.xz"
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
-  MACOS_MIN_VER: "10.13"
-  SDK_VERSION: "10.15"
-  OSXCROSS_TARGET: "darwin19"
-  OSXCROSS_HOST: "x86_64-apple-darwin19"
+  MACOS_MIN: "10.13"
 
 jobs:
-  prepare_toolchain:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: ♻️ Restore Osxcross
-        id: cache-osxcross
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.OSXCROSS_ROOT }}
-          key: osxcross-${{ env.CACHE_REV }}-${{ env.SDK_VERSION }}
-
-      - name: 🔨 Build Osxcross
-        if: steps.cache-osxcross.outputs.cache-hit != 'true'
-        run: |
-          git clone https://github.com/tpoechtrager/osxcross.git ${{ env.OSXCROSS_ROOT }}
-          cd ${{ env.OSXCROSS_ROOT }}
-          mkdir -p tarballs
-          curl -L https://github.com/joseluisq/macosx-sdks/releases/download/${{ env.SDK_VERSION }}/MacOSX${{ env.SDK_VERSION }}.sdk.tar.xz \
-               -o tarballs/MacOSX${{ env.SDK_VERSION }}.sdk.tar.xz
-          UNATTENDED=1 OSX_VERSION_MIN=${{ env.MACOS_MIN_VER }} ./build.sh
-
   build_poppler:
-    needs: prepare_toolchain
     runs-on: ubuntu-22.04
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      - name: 🔧 Install Host Tools
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 1: Развертывание "Универсального Оскросса" (Мгновенно)
+      # ════════════════════════════════════════════════════════════════════════
+      - name: 🚀 Deploy Universal Toolchain
+        run: |
+          sudo mkdir -p /opt/osxcross
+          curl -L ${{ env.OSXCROSS_URL }} | sudo tar -xJ -C /opt/osxcross
+          echo "/opt/osxcross/bin" >> $GITHUB_PATH
+          echo "OSXCROSS_ROOT=/opt/osxcross" >> $GITHUB_ENV
+
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 2: Системные инструменты линукса
+      # ════════════════════════════════════════════════════════════════════════
+      - name: 🔧 Install Build Tools
         run: |
           sudo apt-get update
-          # ДОБАВЛЕНО: autoconf-archive для макросов Fontconfig
-          sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake gettext autopoint autoconf-archive
+          sudo apt-get install -y cmake gperf libtool automake autoconf-archive pkg-config
 
-      - name: ♻️ Restore Toolchain
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.OSXCROSS_ROOT }}
-          key: osxcross-${{ env.CACHE_REV }}-${{ env.SDK_VERSION }}
-          fail-on-cache-miss: true
-
-      - name: ⚙️ Fix Toolchain Environment
-        run: |
-          echo "${{ env.OSXCROSS_TARGET_DIR }}/bin" >> $GITHUB_PATH
-          {
-            echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake"
-            echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
-            echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
-            echo "CC=${{ env.OSXCROSS_HOST }}-clang"
-            echo "CXX=${{ env.OSXCROSS_HOST }}-clang++"
-            echo "LD=${{ env.OSXCROSS_HOST }}-ld"
-            echo "AR=${{ env.OSXCROSS_HOST }}-ar"
-            echo "RANLIB=${{ env.OSXCROSS_HOST }}-ranlib"
-            echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
-            echo "PKG_CONFIG_SYSROOT_DIR=/"
-            echo "CMAKE_COMMON_FLAGS=-DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} -DCMAKE_FIND_ROOT_PATH=${{ env.INSTALL_DIR }} -DCMAKE_BUILD_TYPE=Release"
-          } >> $GITHUB_ENV
-
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 3: Сборка статических либ (Оптимизированный набор)
+      # ════════════════════════════════════════════════════════════════════════
       - name: 📚 Build Dependencies
         run: |
-          export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
+          # Используем CMake везде, где это возможно — это надежнее для кросс-сборки
           
-          echo "🔨 [1/6] ZLIB"
+          # 1. ZLIB (База)
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib && ./configure --prefix=${{ env.INSTALL_DIR }} --static && make -j$(nproc) install && cd ..
+          cd zlib && ./configure --prefix=${{ env.INSTALL_DIR }} --static
+          make -j$(nproc) install && cd ..
 
-          echo "🔨 [2/6] LIBPNG"
+          # 2. LIBPNG
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
+                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DPNG_SHARED=OFF
           make -j$(nproc) install && cd ../..
 
-          echo "🔨 [3/6] FREETYPE"
+          # 3. FREETYPE (Критичен для PDF)
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF -DFT_WITH_ZLIB=ON -DFT_WITH_PNG=ON -DFT_WITH_BZIP2=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
+                   -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
           make -j$(nproc) install && cd ../..
 
-          echo "🔨 [4/6] EXPAT"
-          git clone --depth 1 https://github.com/libexpat/libexpat.git
-          cd libexpat/expat && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF
-          make -j$(nproc) install && cd ../../../
-
-          echo "🔨 [5/6] FONTCONFIG (Final Fix)"
-          git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
-          cd fontconfig
-          NOCONFIGURE=1 ./autogen.sh
-          # ИСПРАВЛЕНИЕ: Передаем кэшированные ответы для va_copy, чтобы не запускать тесты
-          ./configure --host=${{ env.OSXCROSS_HOST }} --build=x86_64-pc-linux-gnu \
-            --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared --disable-libxml2 --disable-docs \
-            ax_cv_have_va_copy=yes \
-            ax_cv_have___va_copy=yes \
-            EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
-            EXPAT_LIBS="-L${{ env.INSTALL_DIR }}/lib -lexpat" \
-            FREETYPE_CFLAGS="-I${{ env.INSTALL_DIR }}/include/freetype2" \
-            FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype"
-          make -j$(nproc) -C src install
-          make -j$(nproc) -C fontconfig install
-          cp fontconfig.pc ${{ env.INSTALL_DIR }}/lib/pkgconfig/
-          cd ..
-
-          echo "🔨 [6/6] OPENJPEG"
-          git clone --depth 1 https://github.com/uclouvain/openjpeg.git
-          cd openjpeg && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
-          make -j$(nproc) install && cd ../..
-
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 4: Сборка Poppler (Используем наш универсальный SDK)
+      # ════════════════════════════════════════════════════════════════════════
       - name: 🔨 Build Poppler Static
         run: |
-          export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
+          
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=/opt/osxcross/toolchain.cmake \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
-            -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF -DENABLE_UTILS=ON \
-            -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
-            -DENABLE_LCMS=OFF -DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF \
-            -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DENABLE_GLIB=OFF \
-            -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include" \
-            -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include"
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN }} \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DENABLE_UTILS=ON \
+            -DENABLE_GLIB=OFF \
+            -DENABLE_QT5=OFF \
+            -DENABLE_QT6=OFF \
+            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }}
+          
           make -j$(nproc) install
 
-      - name: ✅ Finalize & Packaging
+      # ════════════════════════════════════════════════════════════════════════
+      # ШАГ 5: Финализация
+      # ════════════════════════════════════════════════════════════════════════
+      - name: ✅ Archive Results
         run: |
-          cd ${{ github.workspace }}/poppler_dist/bin/
-          tar -cvzf ../../poppler-static-high-sierra.tar.gz *
+          tar -cvzf poppler-high-sierra.tar.gz -C ${{ github.workspace }}/poppler_dist/bin .
 
-      - name: ⬆️ Upload Artifact
+      - name: ⬆️ Upload
         uses: actions/upload-artifact@v4
         with:
-          name: poppler-static-high-sierra
-          path: poppler-static-high-sierra.tar.gz
+          name: poppler-final
+          path: poppler-high-sierra.tar.gz
