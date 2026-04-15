@@ -2,8 +2,7 @@ name: Poppler_HighSierra_Static_Final
 on: [push, workflow_dispatch]
 
 env:
-  # Версия кэша (меняй, если нужно пересобрать тулчейн с нуля)
-  CACHE_REV: "p106-expert"
+  CACHE_REV: "p108-fix"
   OSXCROSS_ROOT: /home/runner/osxcross
   OSXCROSS_TARGET_DIR: /home/runner/osxcross/target
   INSTALL_DIR: ${{ github.workspace }}/deps_dist
@@ -13,7 +12,6 @@ env:
   OSXCROSS_HOST: "x86_64-apple-darwin19"
 
 jobs:
-  # JOB 1: Подготовка кросс-компилятора (Кэшируется отдельно)
   prepare_toolchain:
     runs-on: ubuntu-22.04
     steps:
@@ -34,7 +32,6 @@ jobs:
                -o tarballs/MacOSX${{ env.SDK_VERSION }}.sdk.tar.xz
           UNATTENDED=1 OSX_VERSION_MIN=${{ env.MACOS_MIN_VER }} ./build.sh
 
-  # JOB 2: Сборка Poppler и всех его зависимостей
   build_poppler:
     needs: prepare_toolchain
     runs-on: ubuntu-22.04
@@ -45,7 +42,8 @@ jobs:
       - name: 🔧 Install Host Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake gettext autopoint
+          # ДОБАВЛЕНО: autoconf-archive для макросов Fontconfig
+          sudo apt-get install -y nasm yasm cmake make pkg-config gperf libtool automake gettext autopoint autoconf-archive
 
       - name: ♻️ Restore Toolchain
         uses: actions/cache@v4
@@ -56,121 +54,90 @@ jobs:
 
       - name: ⚙️ Fix Toolchain Environment
         run: |
-          # Добавляем бинарники тулчейна в PATH
           echo "${{ env.OSXCROSS_TARGET_DIR }}/bin" >> $GITHUB_PATH
-          
-          # Устанавливаем переменные окружения для всех последующих шагов
           {
             echo "OSXCROSS_CONF=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake"
             echo "OSXCROSS_SDK=macosx${{ env.SDK_VERSION }}"
             echo "MACOSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }}"
-            
-            # Переменные для принудительного использования кросс-компилятора
             echo "CC=${{ env.OSXCROSS_HOST }}-clang"
             echo "CXX=${{ env.OSXCROSS_HOST }}-clang++"
             echo "LD=${{ env.OSXCROSS_HOST }}-ld"
             echo "AR=${{ env.OSXCROSS_HOST }}-ar"
             echo "RANLIB=${{ env.OSXCROSS_HOST }}-ranlib"
-            
-            # Настройка PKG_CONFIG для кросс-компиляции
             echo "PKG_CONFIG_LIBDIR=${{ env.INSTALL_DIR }}/lib/pkgconfig"
             echo "PKG_CONFIG_SYSROOT_DIR=/"
-            
-            # Общие флаги CMake для всех библиотек
             echo "CMAKE_COMMON_FLAGS=-DCMAKE_TOOLCHAIN_FILE=${{ env.OSXCROSS_TARGET_DIR }}/toolchain.cmake -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} -DCMAKE_FIND_ROOT_PATH=${{ env.INSTALL_DIR }} -DCMAKE_BUILD_TYPE=Release"
           } >> $GITHUB_ENV
 
-      - name: 📚 Build Dependencies (Sequential Strategy)
+      - name: 📚 Build Dependencies
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           mkdir -p ${{ env.INSTALL_DIR }}
           
-          echo "🔨 [1/6] Сборка ZLIB..."
+          echo "🔨 [1/6] ZLIB"
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib
-          ./configure --prefix=${{ env.INSTALL_DIR }} --static
-          make -j$(nproc) install
-          cd ..
+          cd zlib && ./configure --prefix=${{ env.INSTALL_DIR }} --static && make -j$(nproc) install && cd ..
 
-          echo "🔨 [2/6] Сборка LIBPNG..."
+          echo "🔨 [2/6] LIBPNG"
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF
-          make -j$(nproc) install
-          cd ../..
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DPNG_TOOLS=OFF
+          make -j$(nproc) install && cd ../..
 
-          echo "🔨 [3/6] Сборка FREETYPE..."
+          echo "🔨 [3/6] FREETYPE"
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DBUILD_SHARED_LIBS=OFF -DFT_WITH_ZLIB=ON -DFT_WITH_PNG=ON -DFT_WITH_BZIP2=OFF
-          make -j$(nproc) install
-          cd ../..
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF -DFT_WITH_ZLIB=ON -DFT_WITH_PNG=ON -DFT_WITH_BZIP2=OFF
+          make -j$(nproc) install && cd ../..
 
-          echo "🔨 [4/6] Сборка EXPAT..."
+          echo "🔨 [4/6] EXPAT"
           git clone --depth 1 https://github.com/libexpat/libexpat.git
           cd libexpat/expat && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF
-          make -j$(nproc) install
-          cd ../../..
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_shared=OFF -DEXPAT_BUILD_EXAMPLES=OFF -DEXPAT_BUILD_TESTS=OFF
+          make -j$(nproc) install && cd ../../../
 
-          echo "🔨 [5/6] Сборка FONTCONFIG (Режим кросс-компиляции)"
+          echo "🔨 [5/6] FONTCONFIG (Final Fix)"
           git clone --depth 1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git
           cd fontconfig
           NOCONFIGURE=1 ./autogen.sh
+          # ИСПРАВЛЕНИЕ: Передаем кэшированные ответы для va_copy, чтобы не запускать тесты
           ./configure --host=${{ env.OSXCROSS_HOST }} --build=x86_64-pc-linux-gnu \
             --prefix=${{ env.INSTALL_DIR }} --enable-static --disable-shared --disable-libxml2 --disable-docs \
+            ax_cv_have_va_copy=yes \
+            ax_cv_have___va_copy=yes \
             EXPAT_CFLAGS="-I${{ env.INSTALL_DIR }}/include" \
             EXPAT_LIBS="-L${{ env.INSTALL_DIR }}/lib -lexpat" \
             FREETYPE_CFLAGS="-I${{ env.INSTALL_DIR }}/include/freetype2" \
             FREETYPE_LIBS="-L${{ env.INSTALL_DIR }}/lib -lfreetype"
-          # Собираем только библиотеку, чтобы не спотыкаться об утилиты
           make -j$(nproc) -C src install
           make -j$(nproc) -C fontconfig install
           cp fontconfig.pc ${{ env.INSTALL_DIR }}/lib/pkgconfig/
+          cd ..
 
-          echo "🔨 [6/6] Сборка OPENJPEG..."
+          echo "🔨 [6/6] OPENJPEG"
           git clone --depth 1 https://github.com/uclouvain/openjpeg.git
           cd openjpeg && mkdir build && cd build
-          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
-          make -j$(nproc) install
-          cd ../..
+          cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} -DBUILD_SHARED_LIBS=OFF
+          make -j$(nproc) install && cd ../..
 
-      - name: 🔨 Build Poppler Static (The Final Boss)
+      - name: 🔨 Build Poppler Static
         run: |
           export PATH="${{ env.OSXCROSS_TARGET_DIR }}/bin:$PATH"
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler && mkdir build && cd build
-          
-          # Используем знания из FFmpeg: отключаем всё лишнее, фокусируемся на статике
           cmake .. -G "Unix Makefiles" ${{ env.CMAKE_COMMON_FLAGS }} \
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_CPP_LIB=OFF \
-            -DENABLE_UTILS=ON \
-            -DENABLE_CMS='none' \
-            -DENABLE_LIBOPENJPEG='openjpeg2' \
-            -DENABLE_LCMS=OFF \
-            -DENABLE_LIBCURL=OFF \
-            -DENABLE_LIBTIFF=OFF \
-            -DENABLE_QT5=OFF \
-            -DENABLE_QT6=OFF \
-            -DENABLE_GLIB=OFF \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_CPP_LIB=OFF -DENABLE_UTILS=ON \
+            -DENABLE_CMS='none' -DENABLE_LIBOPENJPEG='openjpeg2' \
+            -DENABLE_LCMS=OFF -DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF \
+            -DENABLE_QT5=OFF -DENABLE_QT6=OFF -DENABLE_GLIB=OFF \
             -DCMAKE_C_FLAGS="-I${{ env.INSTALL_DIR }}/include" \
             -DCMAKE_CXX_FLAGS="-I${{ env.INSTALL_DIR }}/include"
-          
           make -j$(nproc) install
 
       - name: ✅ Finalize & Packaging
         run: |
           cd ${{ github.workspace }}/poppler_dist/bin/
-          # Создаем архив с готовыми утилитами (pdftotext, pdfinfo и др.)
           tar -cvzf ../../poppler-static-high-sierra.tar.gz *
 
       - name: ⬆️ Upload Artifact
