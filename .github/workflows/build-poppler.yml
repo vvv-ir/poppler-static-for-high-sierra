@@ -39,18 +39,17 @@ jobs:
           export CC="$CHOST-clang"
           export CXX="$CHOST-clang++"
           
-          # ZLIB
+          # === ZLIB ===
           git clone --depth 1 https://github.com/madler/zlib.git
           cd zlib
-          # Теперь configure отработает честно, тесты пройдут, и errno.h подтянется!
           ./configure --static --prefix=$DEPS_DIR
           make -j$(nproc) install
           cd ..
           
-          # LIBPNG
+          # === LIBPNG ===
           git clone --depth 1 https://github.com/glennrp/libpng.git
-          mkdir png_build && cd png_build
-          # CMake теперь увидит рабочий компилятор
+          cd libpng # <-- ВОТ ЭТА СТРОЧКА СПАСЕТ МИР
+          mkdir build && cd build
           cmake .. -DCMAKE_SYSTEM_NAME=Darwin \
                    -DCMAKE_C_COMPILER=$CC \
                    -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
@@ -58,7 +57,7 @@ jobs:
                    -DZLIB_ROOT=$DEPS_DIR \
                    -DPNG_TESTS=OFF
           make -j$(nproc) install
-          cd ..
+          cd ../.. # Возвращаемся в корень
 
       - name: 03_Build_Poppler
         run: |
