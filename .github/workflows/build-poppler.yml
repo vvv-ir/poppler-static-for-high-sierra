@@ -65,13 +65,21 @@ jobs:
                    -DPNG_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
-      - name: 03_Build_Poppler_REMASTERED
+      - name: 03_Build_Poppler_ULTIMATE
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
           
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
-          mkdir poppler/build && cd poppler/build
+          cd poppler
+          
+          # === ХИРУРГИЯ: Удаляем жесткие зависимости из CMakeLists.txt ===
+          # Убираем REQUIRED у Fontconfig, чтобы он не вешал билд
+          sed -i 's/find_package(Fontconfig REQUIRED)//g' CMakeLists.txt
+          # Убираем поиск Gpgme, который тоже падает
+          sed -i 's/find_soft_mandatory_package(Gpgmepp 1.19)//g' CMakeLists.txt
+          
+          mkdir build && cd build
           
           cmake .. \
             -DCMAKE_SYSTEM_NAME=Darwin \
@@ -95,10 +103,9 @@ jobs:
             -DENABLE_NSS3=OFF \
             -DENABLE_GPGME=OFF \
             -DENABLE_LCMS=OFF \
-            -DENABLE_LIBCURL=OFF \
             -DENABLE_FONTCONFIG=OFF \
-            -DFONTCONFIG_INCLUDE_DIR=$DEPS_DIR/include \
-            -DFONTCONFIG_LIBRARIES=$DEPS_DIR/lib/libz.a
+            -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON
             
           make -j$(nproc)
           make install
