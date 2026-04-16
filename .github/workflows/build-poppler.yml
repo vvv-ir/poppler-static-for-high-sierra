@@ -73,23 +73,18 @@ jobs:
           git clone --depth 1 --branch poppler-22.04.0 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
           
-          # === ЖЕСТКАЯ ХИРУРГИЯ ===
-          # Удаляем REQUIRED
+          # === ХИРУРГИЯ: Убираем REQUIRED, но НЕ трогаем инклюды в .cc файлах ===
           sed -i 's/REQUIRED//g' CMakeLists.txt
-          
-          # Вырезаем инклюд fontconfig из GlobalParams.cc, если он там есть
-          sed -i '/include <fontconfig\/fontconfig.h>/d' poppler/GlobalParams.cc
           
           mkdir build && cd build
           
-          # Добавляем -DHAVE_FONTCONFIG=0 в CMAKE_CXX_FLAGS, чтобы код точно не активировался
           cmake .. \
             -DCMAKE_SYSTEM_NAME=Darwin \
             -DCMAKE_C_COMPILER="x86_64-apple-darwin19-clang" \
             -DCMAKE_CXX_COMPILER="x86_64-apple-darwin19-clang++" \
             -DCMAKE_INSTALL_PREFIX="/opt/toolchain/poppler_dist" \
             -DCMAKE_PREFIX_PATH=$DEPS_DIR \
-            -DCMAKE_CXX_FLAGS="-DHAVE_FONTCONFIG=0 -DHAVE_FONTCONFIG_H=0" \
+            -DFONT_CONFIGURATION=generic \
             -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_UTILS=ON \
             -DENABLE_CPP=OFF \
@@ -107,7 +102,6 @@ jobs:
             -DENABLE_NSS3=OFF \
             -DENABLE_GPGME=OFF \
             -DENABLE_CMS=none \
-            -DFONTCONFIG_LIBRARIES=OFF \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON \
