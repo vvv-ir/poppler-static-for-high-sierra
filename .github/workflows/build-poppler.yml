@@ -109,7 +109,8 @@ jobs:
             -DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_LCMS2=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Cairo=ON
+            -DCMAKE_DISABLE_FIND_PACKAGE_Cairo=ON \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$DEPS_DIR/lib -lpng -lz"
             
           make -j$(nproc)
           make install
