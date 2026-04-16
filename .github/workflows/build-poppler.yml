@@ -50,12 +50,19 @@ jobs:
                    -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DZLIB_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
-          # 3. FREETYPE (Новый гость, нужен для Poppler)
+          # 3. FREETYPE (Исправлено: отключаем Brotli и Bzip2)
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
-                   -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_ZLIB=OFF -DFT_DISABLE_PNG=OFF \
-                   -DZLIB_ROOT=$DEPS_DIR -DPNG_ROOT=$DEPS_DIR
+          cmake .. -DCMAKE_SYSTEM_NAME=Darwin \
+                   -DCMAKE_C_COMPILER=$CC \
+                   -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
+                   -DBUILD_SHARED_LIBS=OFF \
+                   -DFT_DISABLE_ZLIB=OFF \
+                   -DFT_DISABLE_PNG=OFF \
+                   -DFT_DISABLE_BROTLI=ON \
+                   -DFT_DISABLE_BZIP2=ON \
+                   -DZLIB_ROOT=$DEPS_DIR \
+                   -DPNG_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
       - name: 03_Build_Poppler
