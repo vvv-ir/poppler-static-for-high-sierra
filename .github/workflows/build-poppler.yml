@@ -70,11 +70,11 @@ jobs:
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
           
-          # === МАШИНА ВРЕМЕНИ: Берем версию 2022 года (до внедрения C++20) ===
+          # === МАШИНА ВРЕМЕНИ: Берем версию 2022 года ===
           git clone --depth 1 --branch poppler-22.04.0 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
           
-          # === ЖЕСТКАЯ ХИРУРГИЯ (оставляем, она работает) ===
+          # === ЖЕСТКАЯ ХИРУРГИЯ ===
           sed -i 's/REQUIRED//g' CMakeLists.txt
           
           mkdir build && cd build
@@ -101,10 +101,11 @@ jobs:
             -DENABLE_BOOST=OFF \
             -DENABLE_NSS3=OFF \
             -DENABLE_GPGME=OFF \
-            -DENABLE_LCMS=OFF \
+            -DENABLE_CMS=none \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON
+            -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_LCMS2=ON
             
           make -j$(nproc)
           make install
