@@ -65,17 +65,17 @@ jobs:
                    -DPNG_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
-      - name: 03_Build_Poppler_ULTIMATE_FINAL
+      - name: 03_Build_Poppler_STABLE_VETERAN
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
           
-          git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
+          # === МАШИНА ВРЕМЕНИ: Берем версию 2022 года (до внедрения C++20) ===
+          git clone --depth 1 --branch poppler-22.04.0 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
           
-          # === ЖЕСТКАЯ ХИРУРГИЯ ===
+          # === ЖЕСТКАЯ ХИРУРГИЯ (оставляем, она работает) ===
           sed -i 's/REQUIRED//g' CMakeLists.txt
-          sed -i 's/find_soft_mandatory_package(Gpgmepp 1.19)//g' CMakeLists.txt
           
           mkdir build && cd build
           
