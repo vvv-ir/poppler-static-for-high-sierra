@@ -65,7 +65,7 @@ jobs:
                    -DPNG_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
-      - name: 03_Build_Poppler_ULTIMATE
+      - name: 03_Build_Poppler_ULTIMATE_FINAL
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
@@ -73,10 +73,11 @@ jobs:
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
           
-          # === ХИРУРГИЯ: Удаляем жесткие зависимости из CMakeLists.txt ===
-          # Убираем REQUIRED у Fontconfig, чтобы он не вешал билд
-          sed -i 's/find_package(Fontconfig REQUIRED)//g' CMakeLists.txt
-          # Убираем поиск Gpgme, который тоже падает
+          # === ЖЕСТКАЯ ХИРУРГИЯ ===
+          # 1. Удаляем слово REQUIRED везде. Теперь ни одна либа не обязательна для CMake.
+          sed -i 's/REQUIRED//g' CMakeLists.txt
+          
+          # 2. Убираем проверку Gpgmepp, которая игнорирует флаги
           sed -i 's/find_soft_mandatory_package(Gpgmepp 1.19)//g' CMakeLists.txt
           
           mkdir build && cd build
@@ -97,6 +98,7 @@ jobs:
             -DENABLE_GOBJECT_INTROSPECTION=OFF \
             -DENABLE_CMS='none' \
             -DENABLE_LIBJPEG=OFF \
+            -DENABLE_DCTDECODER=none \
             -DENABLE_LIBOPENJPEG=none \
             -DENABLE_LIBTIFF=OFF \
             -DENABLE_BOOST=OFF \
@@ -105,6 +107,7 @@ jobs:
             -DENABLE_LCMS=OFF \
             -DENABLE_FONTCONFIG=OFF \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON
             
           make -j$(nproc)
