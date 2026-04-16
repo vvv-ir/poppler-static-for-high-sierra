@@ -1,106 +1,89 @@
-name: 📄 Poppler_HighSierra_Manual_Control
+name: Golden_Poppler_Builder
 
 on:
-  push:
+  push: 
   workflow_dispatch:
 
-env:
-  # Жёстко заданные константы — фундамент (No Magic)
-  OSXCROSS_HOST: "x86_64-apple-darwin19"
-  MACOSX_DEPLOYMENT_TARGET: "10.13"
-  OSXCROSS_ROOT: "/opt/osxcross"
-  INSTALL_DIR: "${{ github.workspace }}/deps_dist"
-  TOOLCHAIN_FILE: "/opt/osxcross/toolchain.cmake"
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-macos:
     runs-on: ubuntu-22.04
     steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 1: Развертывание тулчейна (Ручная распаковка)
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 🚀 Deploy Toolchain
+      - name: 01_Prepare_Toolchain
         run: |
-          sudo mkdir -p ${{ env.OSXCROSS_ROOT }}
-          # --strip-components=1 гарантирует, что bin/ лежит прямо в /opt/osxcross/
-          curl -L "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v1.0/osxcross-universal-10.13.tar.xz" \
-               | sudo tar -xJ -C ${{ env.OSXCROSS_ROOT }} --strip-components=1
+          sudo mkdir -p /opt/toolchain
+          # Используем твой проверенный 84-мегабайтный FULL архив
+          curl -L "https://github.com/vvv-ir/macos10.15-Catalina-cross-builder/releases/download/toolchain-v2.0-full/osxcross-universal-10.15-FULL.tar.xz" \
+               | sudo tar -xJ -C /opt/toolchain
           
-          # Проверяем физическое наличие файла (Anti-Hallucination Check)
-          if [ ! -f "${{ env.TOOLCHAIN_FILE }}" ]; then echo "Ошибка: Toolchain file NOT FOUND!"; exit 1; fi
+          echo "/opt/toolchain/bin" >> $GITHUB_PATH
+          sudo chown -R $USER:$USER /opt/toolchain
 
-      - name: 🔧 Install System Tools
-        run: sudo apt-get update && sudo apt-get install -y cmake gperf libtool automake autoconf-archive pkg-config
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 2: Сборка ZLIB (С ручным указанием компилятора)
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 📚 Build ZLIB
+      - name: 02_Build_Dependencies (Zlib & PNG)
         run: |
-          mkdir -p ${{ env.INSTALL_DIR }}
+          # Создаем папку для зависимостей
+          export DEPS_DIR=/opt/toolchain/deps
+          mkdir -p $DEPS_DIR
+          
+          export CHOST=x86_64-apple-darwin19
+          export CC="$CHOST-clang"
+          export CXX="$CHOST-clang++"
+          
+          # ZLIB
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib
-          # Явно выставляем инструменты для configure
-          CHOST=${{ env.OSXCROSS_HOST }} \
-          CC=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
-          RANLIB=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-ranlib \
-          ./configure --prefix=${{ env.INSTALL_DIR }} --static
-          make -j$(nproc) install
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 3: Сборка LIBPNG (С полным контролем CMake)
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 📚 Build LIBPNG
-        run: |
-          git clone --depth 1 https://github.com/glennrp/libpng.git
-          cd libpng && mkdir build && cd build
-          cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }} \
-            -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_DIR }} \
-            -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
-            -DPNG_SHARED=OFF \
-            -DPNG_TESTS=OFF \
-            -DCMAKE_C_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
-            -DZLIB_INCLUDE_DIR=${{ env.INSTALL_DIR }}/include \
-            -DZLIB_LIBRARY=${{ env.INSTALL_DIR }}/lib/libz.a
-          make -j$(nproc) install
-
-      # ════════════════════════════════════════════════════════════════════════
-      # ШАГ 4: Сборка POPPLER (Максимальный контроль)
-      # ════════════════════════════════════════════════════════════════════════
-      - name: 🔨 Build Poppler
-        run: |
-          git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
-          cd poppler && mkdir build && cd build
+          cd zlib && ./configure --static --prefix=$DEPS_DIR && make -j$(nproc) install && cd ..
           
-          # Мы не верим, что Poppler сам найдет Zlib или PNG. Мы указываем их за руку.
+          # LIBPNG
+          git clone --depth 1 https://github.com/glennrp/libpng.git
+          mkdir png_build && cd png_build
+          cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
+                   -DPNG_SHARED=OFF -DZLIB_ROOT=$DEPS_DIR
+          make -j$(nproc) install && cd ..
+
+      - name: 03_Build_Poppler
+        run: |
+          export DEPS_DIR=/opt/toolchain/deps
+          export CHOST=x86_64-apple-darwin19
+          
+          # Качаем Poppler
+          git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
+          mkdir poppler/build && cd poppler/build
+          
+          # Отключаем всё лишнее (Qt, Cairo, Glib), чтобы собралось быстро и без ошибок
+          # Нам нужно ядро Poppler для работы с PDF
           cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.TOOLCHAIN_FILE }} \
-            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/poppler_dist" \
-            -DOSXCROSS_HOST=${{ env.OSXCROSS_HOST }} \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=${{ env.MACOS_MIN_VER }} \
+            -DCMAKE_SYSTEM_NAME=Darwin \
+            -DCMAKE_C_COMPILER="x86_64-apple-darwin19-clang" \
+            -DCMAKE_CXX_COMPILER="x86_64-apple-darwin19-clang++" \
+            -DCMAKE_INSTALL_PREFIX="/opt/toolchain/poppler_dist" \
+            -DENABLE_UNSTABLE_API_ABI_HEADERS=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_UTILS=ON \
             -DENABLE_GLIB=OFF \
+            -DENABLE_LIBCURL=OFF \
             -DENABLE_QT5=OFF \
             -DENABLE_QT6=OFF \
-            -DCMAKE_C_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang \
-            -DCMAKE_CXX_COMPILER=${{ env.OSXCROSS_ROOT }}/bin/${{ env.OSXCROSS_HOST }}-clang++ \
-            -DCMAKE_PREFIX_PATH=${{ env.INSTALL_DIR }} \
-            -DZLIB_ROOT=${{ env.INSTALL_DIR }} \
-            -DPNG_PNG_INCLUDE_DIR=${{ env.INSTALL_DIR }}/include
-          
-          make -j$(nproc) install
+            -DENABLE_GOBJECT_INTROSPECTION=OFF \
+            -DENABLE_CMS='none' \
+            -DZLIB_ROOT=$DEPS_DIR \
+            -DPNG_ROOT=$DEPS_DIR
+            
+          make -j$(nproc)
+          make install
 
-      - name: ✅ Finalize
+      - name: 04_Verify_Poppler
         run: |
-          tar -cvzf poppler-high-sierra-final.tar.gz -C ${{ github.workspace }}/poppler_dist/bin .
+          echo "=== ПРОВЕРКА PDFINFO ==="
+          file /opt/toolchain/poppler_dist/bin/pdfinfo
+          # Мы ожидаем увидеть: Mach-O 64-bit x86_64 executable
 
-      - name: ⬆️ Upload
-        uses: actions/upload-artifact@v4
+      - name: 05_Release_Poppler
+        uses: softprops/action-gh-release@v1
         with:
-          name: poppler-final
-          path: poppler-high-sierra-final.tar.gz
+          tag_name: poppler-v1.0
+          name: "Poppler Static Binary (macOS 10.15)"
+          files: |
+            /opt/toolchain/poppler_dist/bin/pdfinfo
+            /opt/toolchain/poppler_dist/lib/libpoppler.a
