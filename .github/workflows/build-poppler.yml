@@ -65,7 +65,7 @@ jobs:
                    -DPNG_ROOT=$DEPS_DIR
           make -j$(nproc) install && cd ../..
 
-      - name: 03_Build_Poppler_STABLE_VETERAN
+      - name: 03_Build_Poppler_WITH_IMAGES
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
@@ -73,7 +73,7 @@ jobs:
           git clone --depth 1 --branch poppler-22.04.0 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
           
-          # === ХИРУРГИЯ ===
+          # Убираем только REQUIRED, чтобы CMake не паниковал раньше времени
           sed -i 's/REQUIRED//g' CMakeLists.txt
           
           mkdir build && cd build
@@ -87,30 +87,29 @@ jobs:
             -DFONT_CONFIGURATION=generic \
             -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_UTILS=ON \
-            -DENABLE_CAIRO=OFF \
-            -DENABLE_LIBPNG=OFF \
             -DENABLE_CPP=OFF \
-            -DENABLE_UNSTABLE_API_ABI_HEADERS=ON \
             -DENABLE_GLIB=OFF \
-            -DENABLE_LIBCURL=OFF \
             -DENABLE_QT5=OFF \
             -DENABLE_QT6=OFF \
-            -DENABLE_GOBJECT_INTROSPECTION=OFF \
-            -DENABLE_LIBJPEG=OFF \
-            -DENABLE_DCTDECODER=none \
+            -DENABLE_CMS=none \
             -DENABLE_LIBOPENJPEG=none \
             -DENABLE_LIBTIFF=OFF \
-            -DENABLE_BOOST=OFF \
-            -DENABLE_NSS3=OFF \
             -DENABLE_GPGME=OFF \
-            -DENABLE_CMS=none \
+            -DENABLE_LCMS=OFF \
+            -DENABLE_LIBCURL=OFF \
+            # --- ВКЛЮЧАЕМ ПОДДЕРЖКУ КАРТИНОК ---
+            -DENABLE_LIBPNG=ON \
+            -DPNG_PNG_INCLUDE_DIR="$DEPS_DIR/include" \
+            -DPNG_LIBRARY="$DEPS_DIR/lib/libpng.a" \
+            -DENABLE_LIBJPEG=libjpeg \
+            -DJPEG_INCLUDE_DIR="$DEPS_DIR/include" \
+            -DJPEG_LIBRARY="$DEPS_DIR/lib/libjpeg.a" \
+            -DZLIB_INCLUDE_DIR="$DEPS_DIR/include" \
+            -DZLIB_LIBRARY="$DEPS_DIR/lib/libz.a" \
+            # --- ФЛАГИ ЛИНКОВКИ (Тот самый твой флаг) ---
+            -DCMAKE_EXE_LINKER_FLAGS="-L$DEPS_DIR/lib -lpng -ljpeg -lz" \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_LCMS2=ON \
-            -DCMAKE_DISABLE_FIND_PACKAGE_Cairo=ON \
-            -DCMAKE_EXE_LINKER_FLAGS="-L$DEPS_DIR/lib -lpng -lz"
+            -DCMAKE_DISABLE_FIND_PACKAGE_Cairo=ON
             
           make -j$(nproc)
           make install
