@@ -74,10 +74,7 @@ jobs:
           cd poppler
           
           # === ЖЕСТКАЯ ХИРУРГИЯ ===
-          # 1. Удаляем слово REQUIRED везде. Теперь ни одна либа не обязательна для CMake.
           sed -i 's/REQUIRED//g' CMakeLists.txt
-          
-          # 2. Убираем проверку Gpgmepp, которая игнорирует флаги
           sed -i 's/find_soft_mandatory_package(Gpgmepp 1.19)//g' CMakeLists.txt
           
           mkdir build && cd build
@@ -90,13 +87,13 @@ jobs:
             -DCMAKE_PREFIX_PATH=$DEPS_DIR \
             -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_UTILS=ON \
+            -DENABLE_CPP=OFF \
             -DENABLE_UNSTABLE_API_ABI_HEADERS=ON \
             -DENABLE_GLIB=OFF \
             -DENABLE_LIBCURL=OFF \
             -DENABLE_QT5=OFF \
             -DENABLE_QT6=OFF \
             -DENABLE_GOBJECT_INTROSPECTION=OFF \
-            -DENABLE_CMS='none' \
             -DENABLE_LIBJPEG=OFF \
             -DENABLE_DCTDECODER=none \
             -DENABLE_LIBOPENJPEG=none \
@@ -105,7 +102,6 @@ jobs:
             -DENABLE_NSS3=OFF \
             -DENABLE_GPGME=OFF \
             -DENABLE_LCMS=OFF \
-            -DENABLE_FONTCONFIG=OFF \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Gpgmepp=ON
