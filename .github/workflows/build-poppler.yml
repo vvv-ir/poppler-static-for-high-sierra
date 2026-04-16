@@ -30,50 +30,49 @@ jobs:
           
           sudo chown -R $USER:$USER /opt/toolchain
 
-      - name: 02_Build_Dependencies (Zlib & PNG)
+      - name: 02_Build_Dependencies (Zlib, PNG, Freetype)
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           mkdir -p $DEPS_DIR
-          
           export CHOST=x86_64-apple-darwin19
           export CC="$CHOST-clang"
           export CXX="$CHOST-clang++"
-          
-          # === ZLIB ===
+          export RANLIB="$CHOST-ranlib"
+
+          # 1. ZLIB (уже умеем)
           git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib
-          ./configure --static --prefix=$DEPS_DIR
-          make -j$(nproc) install
-          cd ..
-          
-          # === LIBPNG ===
+          cd zlib && ./configure --static --prefix=$DEPS_DIR && make -j$(nproc) install && cd ..
+
+          # 2. LIBPNG (исправлено)
           git clone --depth 1 https://github.com/glennrp/libpng.git
-          cd libpng # <-- ВОТ ЭТА СТРОЧКА СПАСЕТ МИР
-          mkdir build && cd build
-          cmake .. -DCMAKE_SYSTEM_NAME=Darwin \
-                   -DCMAKE_C_COMPILER=$CC \
-                   -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
-                   -DPNG_SHARED=OFF \
-                   -DZLIB_ROOT=$DEPS_DIR \
-                   -DPNG_TESTS=OFF
-          make -j$(nproc) install
-          cd ../.. # Возвращаемся в корень
+          cd libpng && mkdir build && cd build
+          cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
+                   -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DZLIB_ROOT=$DEPS_DIR
+          make -j$(nproc) install && cd ../..
+
+          # 3. FREETYPE (Новый гость, нужен для Poppler)
+          git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
+          cd freetype && mkdir build && cd build
+          cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
+                   -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_ZLIB=OFF -DFT_DISABLE_PNG=OFF \
+                   -DZLIB_ROOT=$DEPS_DIR -DPNG_ROOT=$DEPS_DIR
+          make -j$(nproc) install && cd ../..
 
       - name: 03_Build_Poppler
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           export CHOST=x86_64-apple-darwin19
-          export CC="$CHOST-clang"
-          export CXX="$CHOST-clang++"
           
           git clone --depth 1 https://gitlab.freedesktop.org/poppler/poppler.git
           mkdir poppler/build && cd poppler/build
           
+          # Явно указываем пути к нашим собранным либам через CMAKE_PREFIX_PATH
           cmake .. \
             -DCMAKE_SYSTEM_NAME=Darwin \
-            -DCMAKE_C_COMPILER=$CC \
-            -DCMAKE_CXX_COMPILER=$CXX \
+            -DCMAKE_C_COMPILER="x86_64-apple-darwin19-clang" \
+            -DCMAKE_CXX_COMPILER="x86_64-apple-darwin19-clang++" \
             -DCMAKE_INSTALL_PREFIX="/opt/toolchain/poppler_dist" \
+            -DCMAKE_PREFIX_PATH=$DEPS_DIR \
             -DENABLE_UNSTABLE_API_ABI_HEADERS=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DENABLE_UTILS=ON \
@@ -83,8 +82,10 @@ jobs:
             -DENABLE_QT6=OFF \
             -DENABLE_GOBJECT_INTROSPECTION=OFF \
             -DENABLE_CMS='none' \
-            -DZLIB_ROOT=$DEPS_DIR \
-            -DPNG_ROOT=$DEPS_DIR
+            -DFONTCONFIG_EXECUTABLE=OFF \
+            -DENABLE_BOOST=OFF \
+            -DENABLE_DCTDECODER=libjpeg \
+            -DENABLE_LIBOPENJPEG=none
             
           make -j$(nproc)
           make install
