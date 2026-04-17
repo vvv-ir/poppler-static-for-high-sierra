@@ -30,39 +30,43 @@ jobs:
           
           sudo chown -R $USER:$USER /opt/toolchain
 
-      - name: 02_Build_Dependencies (Zlib, PNG, Freetype)
+      - name: 02_Build_Dependencies (Zlib, PNG, JPEG, Freetype)
         run: |
           export DEPS_DIR=/opt/toolchain/deps
           mkdir -p $DEPS_DIR
           export CHOST=x86_64-apple-darwin19
           export CC="$CHOST-clang"
           export CXX="$CHOST-clang++"
+          export AR="$CHOST-ar"
           export RANLIB="$CHOST-ranlib"
 
-          # 1. ZLIB (уже умеем)
-          git clone --depth 1 https://github.com/madler/zlib.git
-          cd zlib && ./configure --static --prefix=$DEPS_DIR && make -j$(nproc) install && cd ..
+          # 1. ZLIB
+          wget https://zlib.net/fossils/zlib-1.3.1.tar.gz
+          tar -xzf zlib-1.3.1.tar.gz && cd zlib-1.3.1
+          # Для кросс-компиляции zlib нужно явно указать компилятор
+          CC=$CC ./configure --static --prefix=$DEPS_DIR
+          make -j$(nproc) install && cd ..
 
-          # 2. LIBPNG (исправлено)
+          # 2. LIBJPEG (НОВЫЙ ШАГ - БЕЗ НЕГО И ПАДАЛО)
+          wget http://www.ijg.org/files/jpegsrc.v9e.tar.gz
+          tar -xzf jpegsrc.v9e.tar.gz && cd jpeg-9e
+          ./configure --host=$CHOST --prefix=$DEPS_DIR --disable-shared --enable-static
+          make -j$(nproc) install && cd ..
+
+          # 3. LIBPNG
           git clone --depth 1 https://github.com/glennrp/libpng.git
           cd libpng && mkdir build && cd build
           cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
-                   -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DZLIB_ROOT=$DEPS_DIR
+                   -DPNG_SHARED=OFF -DPNG_TESTS=OFF -DZLIB_ROOT=$DEPS_DIR \
+                   -DCMAKE_FIND_FRAMEWORK=NEVER
           make -j$(nproc) install && cd ../..
 
-          # 3. FREETYPE (Исправлено: отключаем Brotli и Bzip2)
+          # 4. FREETYPE
           git clone --depth 1 https://gitlab.freedesktop.org/freetype/freetype.git
           cd freetype && mkdir build && cd build
-          cmake .. -DCMAKE_SYSTEM_NAME=Darwin \
-                   -DCMAKE_C_COMPILER=$CC \
-                   -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
-                   -DBUILD_SHARED_LIBS=OFF \
-                   -DFT_DISABLE_ZLIB=OFF \
-                   -DFT_DISABLE_PNG=OFF \
-                   -DFT_DISABLE_BROTLI=ON \
-                   -DFT_DISABLE_BZIP2=ON \
-                   -DZLIB_ROOT=$DEPS_DIR \
-                   -DPNG_ROOT=$DEPS_DIR
+          cmake .. -DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_C_COMPILER=$CC -DCMAKE_INSTALL_PREFIX=$DEPS_DIR \
+                   -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_BROTLI=ON -DFT_DISABLE_BZIP2=ON \
+                   -DCMAKE_FIND_FRAMEWORK=NEVER
           make -j$(nproc) install && cd ../..
 
       - name: 03_Build_Poppler_WITH_IMAGES
@@ -72,8 +76,6 @@ jobs:
           
           git clone --depth 1 --branch poppler-22.04.0 https://gitlab.freedesktop.org/poppler/poppler.git
           cd poppler
-          
-          # Убираем только REQUIRED, чтобы CMake не паниковал раньше времени
           sed -i 's/REQUIRED//g' CMakeLists.txt
           
           mkdir build && cd build
@@ -97,16 +99,15 @@ jobs:
             -DENABLE_GPGME=OFF \
             -DENABLE_LCMS=OFF \
             -DENABLE_LIBCURL=OFF \
-            # --- ВКЛЮЧАЕМ ПОДДЕРЖКУ КАРТИНОК ---
+            -DCMAKE_FIND_FRAMEWORK=NEVER \
             -DENABLE_LIBPNG=ON \
             -DPNG_PNG_INCLUDE_DIR="$DEPS_DIR/include" \
             -DPNG_LIBRARY="$DEPS_DIR/lib/libpng.a" \
-            -DENABLE_LIBJPEG=libjpeg \
+            -DENABLE_DCTDECODER=libjpeg \
             -DJPEG_INCLUDE_DIR="$DEPS_DIR/include" \
             -DJPEG_LIBRARY="$DEPS_DIR/lib/libjpeg.a" \
             -DZLIB_INCLUDE_DIR="$DEPS_DIR/include" \
             -DZLIB_LIBRARY="$DEPS_DIR/lib/libz.a" \
-            # --- ФЛАГИ ЛИНКОВКИ (Тот самый твой флаг) ---
             -DCMAKE_EXE_LINKER_FLAGS="-L$DEPS_DIR/lib -lpng -ljpeg -lz" \
             -DCMAKE_DISABLE_FIND_PACKAGE_Fontconfig=ON \
             -DCMAKE_DISABLE_FIND_PACKAGE_Cairo=ON
