@@ -86,14 +86,16 @@ jobs:
           
           mkdir build && cd build
           
-          # Мы добавляем CMAKE_PREFIX_PATH чтобы он сам нашел все в $DEPS_DIR
           cmake .. \
             -DCMAKE_SYSTEM_NAME=Darwin \
             -DENABLE_BOOST=OFF \
             -DCMAKE_C_COMPILER="x86_64-apple-darwin19-clang" \
             -DCMAKE_CXX_COMPILER="x86_64-apple-darwin19-clang++" \
+            -DCMAKE_C_FLAGS="-I$DEPS_DIR/include" \
+            -DCMAKE_CXX_FLAGS="-I$DEPS_DIR/include" \
             -DCMAKE_INSTALL_PREFIX="/opt/toolchain/poppler_dist" \
             -DCMAKE_PREFIX_PATH=$DEPS_DIR \
+            -DCMAKE_FIND_ROOT_PATH=$DEPS_DIR \
             -DCMAKE_FIND_FRAMEWORK=NEVER \
             -DFONT_CONFIGURATION=generic \
             -DBUILD_SHARED_LIBS=OFF \
