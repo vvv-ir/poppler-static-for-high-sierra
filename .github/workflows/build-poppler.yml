@@ -89,6 +89,7 @@ jobs:
           # Мы добавляем CMAKE_PREFIX_PATH чтобы он сам нашел все в $DEPS_DIR
           cmake .. \
             -DCMAKE_SYSTEM_NAME=Darwin \
+            -DENABLE_BOOST=OFF \
             -DCMAKE_C_COMPILER="x86_64-apple-darwin19-clang" \
             -DCMAKE_CXX_COMPILER="x86_64-apple-darwin19-clang++" \
             -DCMAKE_INSTALL_PREFIX="/opt/toolchain/poppler_dist" \
